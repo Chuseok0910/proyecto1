@@ -1,6 +1,5 @@
 <template>
   <div class="Home">
-
     <v-dialog v-model="dialogoEditar" persistent max-width="500px">
       <v-card>
         <v-card-title>
@@ -27,6 +26,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
     <v-text-field
       v-model="nuevoTituloTarea"
       @click:append="agregarTarea()"
@@ -82,75 +82,166 @@
 </template>
 
 <script>
+// 1. Importamos la 'db' de tu archivo firebase.js
+import { db } from '@/plugins/firebase';
+
+// 2. Importamos TODAS las funciones de Firestore v9 que necesitamos
+import { 
+  collection,   // Para referenciar la colección 'tareas'
+  query,        // Para crear una consulta
+  orderBy,      // Para ordenar los resultados
+  onSnapshot,   // Para LEER en tiempo real (Read)
+  addDoc,       // Para AÑADIR un documento (Create)
+  updateDoc,    // Para ACTUALIZAR un documento (Update)
+  deleteDoc,    // Para BORRAR un documento (Delete)
+  doc,          // Para referenciar un documento por su ID
+  serverTimestamp // Para guardar la fecha/hora del servidor
+} from "firebase/firestore";
+
 export default {
   name: 'Home',
   data() {
     return {
       nuevoTituloTarea: "",
-      tareas: [
-        {
-          id: 1,
-          titulo: "Levantarse",
-          hecho: false,
-        },
-        {
-          id: 2,
-          titulo: "Desayunar",
-          hecho: false,
-        },
-        {
-          id: 3,
-          titulo: "Ir a la escuela",
-          hecho: false,
-        }
-      ],
+      
+      // 'tareas' empieza vacío. Firestore lo llenará.
+      tareas: [], 
 
-      // --- CAMBIOS: Nuevas variables para el diálogo de edición ---
-      dialogoEditar: false, // Controla si el diálogo se muestra o no
-      tareaAEditar: null, // Almacena la tarea que estamos editando
-      nuevoTituloEditado: "" // Almacena el texto del campo de edición
-      // --- Fin de los cambios en data ---
+      // Variables para el diálogo de edición (sin cambios)
+      dialogoEditar: false, 
+      tareaAEditar: null, 
+      nuevoTituloEditado: "" 
     }
   },
+  
+  /**
+   * 'mounted' es un hook de Vue que se ejecuta cuando
+   * el componente se carga. Es el lugar perfecto para
+   * pedirle a Firebase que nos traiga los datos.
+   */
+  mounted() {
+    this.obtenerTareas();
+  },
+
   methods: {
-    agregarTarea() {
-      //console.log("Agregar tarea")
-      let nTarea = {
-        id: Date.now(),
-        titulo: this.nuevoTituloTarea,
-        hecho: false
+    /**
+     * LEER (Read)
+     * Se conecta a Firestore y escucha cambios en tiempo real.
+     */
+    obtenerTareas() {
+      try {
+        // Creamos una consulta (query) a la colección 'tareas'
+        // y la ordenamos por 'creadoEn' de forma descendente.
+        const q = query(collection(db, 'tareas'), orderBy('creadoEn', 'desc'));
+
+        // onSnapshot es el "oyente". Se activa una vez al inicio
+        // y luego CADA VEZ que algo cambia en la base de datos.
+        onSnapshot(q, (querySnapshot) => {
+          
+          // Creamos un array temporal para guardar las tareas
+          const tareasTemp = [];
+          
+          querySnapshot.forEach((doc) => {
+            // Empujamos cada tarea al array temporal
+            tareasTemp.push({
+              id: doc.id, // El ID único del documento
+              titulo: doc.data().titulo,
+              hecho: doc.data().hecho
+              // (No necesitamos 'creadoEn' aquí, solo para ordenar)
+            });
+          });
+          
+          // Reemplazamos el array local 'tareas' con los datos de Firebase.
+          // Vue/Vuetify reaccionará y pintará la lista.
+          this.tareas = tareasTemp;
+        });
+
+      } catch (error) {
+        console.error("Error al obtener tareas: ", error);
       }
-      this.tareas.push(nTarea)
-      this.nuevoTituloTarea = ""
     },
-    TareaHecho(id) {
-      //console.log("ID:",id)
-      let tarea = this.tareas.filter(tarea => tarea.id === id)[0]
-      tarea.hecho = !tarea.hecho
+
+    /**
+     * CREAR (Create)
+     * Añade una nueva tarea a la colección 'tareas' en Firestore.
+     */
+    async agregarTarea() {
+      if (this.nuevoTituloTarea.trim() === "") return;
+
+      try {
+        // Objeto de la nueva tarea
+        const nTarea = {
+          titulo: this.nuevoTituloTarea,
+          hecho: false,
+          creadoEn: serverTimestamp() // Fecha de creación
+        }
+        
+        // Usamos 'addDoc' para añadir el documento
+        await addDoc(collection(db, 'tareas'), nTarea);
+        
+        // Limpiamos el campo de texto
+        this.nuevoTituloTarea = "";
+        
+        // NOTA: No hacemos 'this.tareas.push()'.
+        // ¡'onSnapshot' detectará este cambio y lo hará por nosotros!
+
+      } catch (error) {
+        console.error("Error al agregar tarea: ", error);
+      }
     },
-    BorrarTarea(id) {
-      //alert(id)
+
+    /**
+     * ACTUALIZAR (Update) - Marcar como "hecha"
+     */
+    async TareaHecho(id) {
+      try {
+        // Buscamos la tarea en el array local para saber su estado actual
+        let tarea = this.tareas.find(t => t.id === id);
+        
+        if (tarea) {
+          // 1. Creamos la referencia al documento
+          const docRef = doc(db, 'tareas', id);
+          
+          // 2. Usamos 'updateDoc' para cambiar solo el campo 'hecho'
+          await updateDoc(docRef, {
+            hecho: !tarea.hecho // Invertimos el valor (true/false)
+          });
+          // 'onSnapshot' detectará este cambio.
+        }
+      } catch (error) {
+        console.error("Error al actualizar 'hecho': ", error);
+      }
+    },
+
+    /**
+     * BORRAR (Delete)
+     */
+    async BorrarTarea(id) {
       if (confirm("¿Deseas eliminar el registro?")) {
-        this.tareas = this.tareas.filter(tarea => tarea.id != id)
+        try {
+          // 1. Creamos la referencia al documento
+          const docRef = doc(db, 'tareas', id);
+          
+          // 2. Usamos 'deleteDoc' para borrarlo
+          await deleteDoc(docRef);
+          
+          // 'onSnapshot' detectará este borrado.
+        } catch (error) {
+          console.error("Error al borrar tarea: ", error);
+        }
       }
     },
 
-    // --- CAMBIOS: Nuevos métodos para editar ---
+    // --- Métodos de Edición (Casi sin cambios) ---
 
-    /**
-     * Se llama al hacer clic en el icono de lápiz.
-     * Prepara el diálogo de edición.
-     */
+    // Esto es lógica local, no toca Firebase.
     iniciarEdicion(tarea) {
-      this.tareaAEditar = tarea; // Guarda la tarea que se va a editar
-      this.nuevoTituloEditado = tarea.titulo; // Pone el título actual en el campo de texto
-      this.dialogoEditar = true; // Muestra el diálogo
+      this.tareaAEditar = tarea; 
+      this.nuevoTituloEditado = tarea.titulo; 
+      this.dialogoEditar = true; 
     },
 
-    /**
-     * Se llama al hacer clic en 'Cancelar' en el diálogo.
-     * Cierra el diálogo y resetea las variables.
-     */
+    // Esto es lógica local, no toca Firebase.
     cancelarEdicion() {
       this.dialogoEditar = false;
       this.tareaAEditar = null;
@@ -158,22 +249,41 @@ export default {
     },
 
     /**
-     * Se llama al hacer clic en 'Guardar' en el diálogo.
-     * Actualiza el título de la tarea y cierra el diálogo.
+     * ACTUALIZAR (Update) - Guardar nuevo título
      */
-    guardarEdicion() {
-      // Nos aseguramos de que el nuevo título no esté vacío
-      if (this.nuevoTituloEditado.trim() === "") {
-        return; // Opcional: podrías mostrar una alerta aquí
+    async guardarEdicion() {
+      if (this.nuevoTituloEditado.trim() === "" || !this.tareaAEditar) {
+        this.cancelarEdicion();
+        return;
       }
       
-      // Actualiza el título de la tarea guardada
-      this.tareaAEditar.titulo = this.nuevoTituloEditado;
+      try {
+        // 1. Creamos la referencia al documento
+        const docRef = doc(db, 'tareas', this.tareaAEditar.id);
+        
+        // 2. Usamos 'updateDoc' para cambiar solo el 'titulo'
+        await updateDoc(docRef, {
+          titulo: this.nuevoTituloEditado
+        });
+        
+        // 'onSnapshot' detectará este cambio.
+      } catch (error) {
+        console.error("Error al guardar edición: ", error);
+      }
       
-      // Cierra el diálogo usando el método de cancelar
-      this.cancelarEdicion();
+      this.cancelarEdicion(); // Cerramos el diálogo
     }
-    // --- Fin de los nuevos métodos ---
   }
 }
 </script>
+
+<style scoped>
+/* Añadimos el estilo para la clase '.blue' que usa
+  el v-list-item cuando 'tarea.hecho' es true.
+  'scoped' significa que este estilo solo aplica a 
+  este componente.
+*/
+.blue {
+  background-color: #E3F2FD; /* Un azul pálido de Vuetify */
+}
+</style>
