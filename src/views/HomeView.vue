@@ -44,7 +44,7 @@
       <div v-for="tarea in tareas" :key="tarea.id">
         <v-list-item
           @click="TareaHecho(tarea.id)"
-          :class="{ 'blue': tarea.hecho }"
+          :class="{ 'indigo lighten-4': tarea.hecho }"
         >
           <template v-slot>
             <v-list-item-action>
